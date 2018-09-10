@@ -1,0 +1,1219 @@
+---
+  title: "Loan Default Analysis and Prediction"
+output:
+  pdf_document: default
+html_document: default
+---
+  
+  
+  ```{r}
+#install.packages("rpart")
+
+
+rm(list=ls())
+setwd("E:/0-Resume workshop/Aspiration Partners/creditcard.csv")
+```
+
+
+```{r}
+
+df1 = read.csv(file="LoanStats.csv",header=TRUE,sep=",")
+
+#str(df1)
+dim(df1)
+table(df1$loan_status)
+
+```
+
+
+##as we can see, there are too many unuseful variables...
+```{r}
+
+#sapply(df1, function(x) {sum(is.na(x))})
+
+
+```
+
+##by removing those missing variables, the dim of the dataset has been reduced from 145 to 51.
+
+```{r}
+df2=subset(df1, select=c(loan_amnt, funded_amnt, funded_amnt_inv,term, int_rate, installment, grade,sub_grade,emp_title,emp_length,home_ownership,annual_inc,verification_status,issue_d,loan_status,pymnt_plan, purpose,title,zip_code, addr_state,dti, delinq_2yrs,earliest_cr_line, inq_last_6mths, open_acc, pub_rec, revol_bal,total_acc,initial_list_status,out_prncp, out_prncp_inv, total_pymnt,total_pymnt_inv,  total_rec_prncp, total_rec_int,total_rec_late_fee, recoveries, collection_recovery_fee, last_pymnt_d,last_pymnt_amnt,next_pymnt_d, last_credit_pull_d, collections_12_mths_ex_med,policy_code, application_type,acc_now_delinq,disbursement_method,debt_settlement_flag,debt_settlement_flag_date,settlement_status, settlement_date))
+
+```
+
+
+
+```{r}
+unique(df2$loan_status)
+
+```
+
+##as we are only interested in "fully paid" and 'charged off' (they think they will never recover)
+```{r}
+df3=df2[df2$loan_status=='Fully Paid' | df2$loan_status=='Charged Off', ]
+
+str(df3)
+
+#df3$loan_status=ifelse(df3$loan_status=='Fully Paid', 0, 1)
+
+
+```
+
+##Now let's visualize the default and fully paid
+```{r}
+library(ggplot2)
+df3=df2[df2$loan_status=='Fully Paid' | df2$loan_status=='Charged Off', ]
+levels(df3$loan_status)
+df3 = droplevels(df3)
+
+#plot(df3$loan_status)
+
+ggplot(df3, aes(x = loan_status, fill = loan_status)) +
+  geom_bar(stat='count') +
+  labs(x = '') +
+  geom_label(stat='count',aes(label=..count..))+theme_bw()
+
+
+```
+
+```{r, fig.width=4,fig.height=3.5}
+ggplot(df3, aes(x = loan_status, fill = loan_status)) +
+  geom_bar(stat='count', width = 0.7) +
+  labs(x = '') +geom_text(stat='count', aes(label=sprintf("%d\n(%d %%)", ..count.., round(..count.. * 100/sum(..count..), 0)), vjust=0))+theme_bw()+ylim(0, 38000)+guides(fill=FALSE)+ scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+
+```
+
+
+
+#To better investigate numerical variables, let's check collinearity between all numeric columns
+
+```{r,  fig.width=8,fig.height=8.2}
+#install.packages('corrplot')
+library(corrplot)
+#cnt_vars <- c('loan_amnt','funded_amnt','funded_amnt_inv','installment', 'annual_inc','total_pymnt', 'dti','inq_last_6mths', 'open_acc', 'pub_rec', 'revol_bal','total_acc','out_prncp', 'out_prncp_inv', 'total_pymnt','total_pymnt_inv','total_rec_prncp','total_rec_int','total_rec_late_fee','recoveries', 'collection_recovery_fee','last_pymnt_d','last_pymnt_amnt','collections_12_mths_ex_med','acc_now_delinq')
+
+
+cnt_vars <- c('loan_amnt','funded_amnt','funded_amnt_inv','installment', 'annual_inc','total_pymnt', 'dti','inq_last_6mths', 'open_acc', 'pub_rec', 'revol_bal','total_acc','total_pymnt','total_pymnt_inv','total_rec_prncp','total_rec_int','total_rec_late_fee', 'recoveries', 'collection_recovery_fee', 'last_pymnt_amnt')
+
+
+#variance=0, remove 'out_prncp', 'out_prncp_inv', 'acc_now_delinq', 'policy_code'
+
+corrplot(cor(df3[, cnt_vars], use='pairwise.complete.obs'), type='lower', tl.cex = 0.8, tl.col = "dodgerblue4")
+
+```
+
+##for numerical, remove highly correlated variables, and remove unrelated variables
+
+```{r}
+df4=subset(df3, select=-c(out_prncp, out_prncp_inv, funded_amnt, funded_amnt_inv, installment,total_pymnt,total_pymnt_inv,total_rec_prncp,total_rec_int,total_rec_late_fee, recoveries, collection_recovery_fee, last_pymnt_amnt, acc_now_delinq, policy_code))
+
+dim(df4)
+
+```
+
+
+```{r}
+unique(df4$term)
+sum(is.na(df4$term))
+str(df4)
+
+```
+
+
+#data type convert
+
+```{r}
+#unique(df4$delinq_2yrs)
+#unique(df4$policy_code) 
+unique(df4$loan_status) 
+
+#df4$loan_status=ifelse(df4$loan_status=='Fully Paid', 0, 1)
+
+#df4$int_rate=as.numeric(df4$int_rate)
+#str(df4)
+
+```
+
+```{r}
+unique(df4$emp_length)
+unique(df4$collections_12_mths_ex_med)
+
+```
+
+
+#after understanding the metadata, decide to drop those categorical variables
+```{r}
+df5=subset(df4, select=-c(sub_grade, emp_title,issue_d,title, zip_code, collections_12_mths_ex_med, last_pymnt_d, next_pymnt_d, debt_settlement_flag, debt_settlement_flag_date, settlement_status, settlement_date, last_credit_pull_d,  pymnt_plan, initial_list_status, disbursement_method,application_type))
+
+str(df5)
+
+```
+
+
+```{r, fig.width=8,fig.height=8.2}
+#summary(df5)
+unique(df5$delinq_2yrs)
+df5=subset(df5, select=-c(total_acc))
+
+num_vars <- c('loan_amnt', 'annual_inc', 'dti', 'delinq_2yrs', 'inq_last_6mths', 'open_acc', 'pub_rec', 'revol_bal')
+
+
+
+#variance=0, remove 'out_prncp', 'out_prncp_inv', 'acc_now_delinq', 'policy_code'
+
+corrplot(cor(df5[, num_vars], use='pairwise.complete.obs'), type='lower', tl.cex = 0.8, tl.col = "dodgerblue4")
+
+```
+
+
+
+```{r}
+sapply(df5, function(x) {sum(is.na(x))})
+
+str(df5)
+
+```
+
+```{r}
+#install.packages('varhandle')
+library(varhandle)
+
+df5$int_rate = unfactor(df5$int_rate)
+class(df5$int_rate)
+
+df5$int_rate = substr(df5$int_rate, 1, nchar(df5$int_rate)-1)
+df5$int_rate = as.numeric(df5$int_rate)
+class(df5$int_rate)
+#df5$int_rate 
+
+str(df5)
+
+
+```
+
+```{r}
+summary(df5$emp_length)
+levels(df5$emp_length)
+
+df5=df5[df5$emp_length !='n/a', ]
+levels(df5$emp_length)
+df5 = droplevels(df5)
+levels(df5$emp_length)
+summary(df5$emp_length)
+
+```
+
+
+```{r}
+library(ggplot2)
+
+ggplot(df5, aes(x = emp_length, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'emp_length')+theme_bw()
+
+p_emp = ggplot(df5, mapping = aes(x = emp_length, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Employment Length') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_emp
+
+summary(df5$emp_length)
+
+```
+
+```{r}
+summary(df5$emp_length)
+library(dplyr)
+#df5$emp_length = ifelse(df5$emp_length %in% c("10+ years", " 9 years", "8 years"),"8+years",  )
+
+levels(df5$emp_length)
+
+# combine some levels
+
+levels(df5$emp_length) = c("3yrs and less","3yrs and less", "7yrs and plus", "3yrs and less", "3yrs and less", "4-6 yrs","4-6 yrs", "4-6 yrs","7yrs and plus", "7yrs and plus", "7yrs and plus")
+
+levels(df5$emp_length)
+
+```
+
+```{r}
+ggplot(df5, aes(x = emp_length, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'emp_length')+theme_bw()
+
+p_emp = ggplot(df5, mapping = aes(x = emp_length, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') 
+labs(x = 'Employment Length') 
+scale_fill_discrete(name="loan_status") + theme_bw()
+p_emp
+
+summary(df5$emp_length)
+```
+
+
+```{r}
+ggplot(df5, aes(x = purpose, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'Purpose')+theme_bw()+ theme(axis.text.x = element_text(angle=90, hjust=1,vjust=0.5))
+
+p_pps = ggplot(df5, mapping = aes(x = purpose, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Purpose') +
+  scale_fill_discrete(name="loan_status") + theme_bw()+ theme(axis.text.x = element_text(angle=90, hjust=1,vjust=0.5))
+
+p_pps
+
+```
+
+```{r}
+summary(df5$purpose)
+```
+
+```{r}
+levels(df5$purpose)
+
+# combine some levels
+
+levels(df5$purpose) = c("car","credit_card", "debt_consolidation", "other", "home_improvement", "other","major_purchase", "other","other", "other", "other", "small_business","other", "other")
+
+levels(df5$purpose)
+
+```
+
+```{r, fig.width=8,fig.height=6}
+
+ggplot(df5, aes(x = purpose, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'Purpose')+theme_bw()+ theme(axis.text.x = element_text(angle=90, hjust=1,vjust=0.5))+scale_fill_discrete(name = "Loan Status")+scale_fill_manual(values = c("salmon2", "deepskyblue4"))+theme(axis.text=element_text(size=12))
+
+p_pps = ggplot(df5, mapping = aes(x = purpose, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Purpose') +
+  scale_fill_discrete(name="loan_status") + theme_bw()+ theme(axis.text.x = element_text(angle=90, hjust=1,vjust=0.5))+ scale_fill_discrete(name = "Loan Status")+scale_fill_manual(values = c("salmon2", "deepskyblue4"))+theme(axis.text=element_text(size=12))
+
+p_pps
+
+
+```
+
+
+```{r}
+dim(df5)
+unique(df5$home_ownership)
+df5=df5[df5$home_ownership !='NONE' & df5$home_ownership != 'OTHER', ]
+unique(df5$home_ownership)
+
+levels(df5$home_ownership)
+df5 = droplevels(df5)
+levels(df5$home_ownership)
+
+```
+
+
+
+```{r, fig.width=4,fig.height=4}
+
+ggplot(df5, aes(x = term, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'Term')+theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+
+p_term = ggplot(df5, mapping = aes(x = term, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Term') +
+  scale_fill_discrete(name="loan_status") + theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+
+p_term
+
+```
+
+```{r}
+summary(df5$grade)
+```
+
+```{r}
+
+levels(df5$grade)
+
+# combine some levels
+
+levels(df5$grade) = c("A", "B", "C", "D", "E","E+", "E+" )
+
+levels(df5$grade)
+
+```
+
+
+```{r}
+
+ggplot(df5, aes(x = grade, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'Grade')+theme_bw()
+
+p_grade = ggplot(df5, mapping = aes(x = grade, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Grade') + 
+  scale_fill_discrete(name="loan_status")+ theme_bw()
+
+
+
+p_grade
+
+
+
+```
+
+```{r}
+ggplot(df5, aes(x = grade, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'Grade')+theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+
+p_grade = ggplot(df5, mapping = aes(x = grade, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Grade') + 
+  scale_fill_discrete(name="loan_status")+ theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+
+
+
+p_grade
+
+
+```
+
+
+
+```{r}
+ggplot(df5, aes(x = grade, y = int_rate, fill = loan_status)) +
+  geom_boxplot(width = 1)+ theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+```
+
+
+
+```{r, fig.width=4,fig.height=4}}
+
+ggplot(df5, aes(x = home_ownership, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'Home Ownership')+theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+
+p_home = ggplot(df5, mapping = aes(x = home_ownership, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Home Ownership') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+
+p_home
+
+
+```
+
+```{r}
+ggplot(df5, aes(x = home_ownership, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'Home Ownership')+theme_bw()
+
+p_home = ggplot(df5, mapping = aes(x = home_ownership, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Home Ownership') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_home
+```
+
+
+```{r}
+ggplot(df5, aes(x = verification_status, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'verification_status')+theme_bw()
+
+
+p_verify = ggplot(df5, mapping = aes(x = verification_status, fill = loan_status)) +
+  geom_bar(stat='count', position='fill') +
+  labs(x = 'Verification Status') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_verify
+
+```
+
+```{r}
+range(df5$annual_inc)
+sum(is.na(df5$annual_inc))
+
+```
+
+```{r}
+ggplot(df5, aes(x = loan_status, y = annual_inc)) +
+  geom_boxplot()
+
+```
+
+
+##Remove outliers
+
+```{r, fig.width=4,fig.height=3}
+df5=df5[df5$annual_inc < 100850 & df5$annual_inc > 0, ]
+ggplot(df5, aes(x = loan_status, y = annual_inc, fill = loan_status)) +
+  geom_boxplot()+theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))+xlab('')+guides(fill=FALSE)
+
+IQR(df5$annual_inc)*1.5+72000
+quantile(df5$annual_inc)
+
+```
+
+```{r}
+ggplot(df5, aes(x = annual_inc, fill = loan_status)) +
+  geom_density(alpha=0.5, aes(fill=factor(loan_status))) + labs(title="loan_status density and income") + xlim(0, 150000)+theme_bw()
+scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+```
+
+```{r}
+#install.packages("ggridges")
+library(ggridges)
+
+# basic example
+ggplot(df5, aes(x = annual_inc, y = loan_status, fill =loan_status)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")+xlim(0, 150000)
+
+
+
+```
+
+
+```{r}
+
+ggplot(df5, aes(x = annual_inc, y = loan_status, fill =loan_status)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")+xlim(0, 150000) + scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+```
+
+
+
+
+
+
+```{r}
+
+ggplot(df5, aes(x = dti, y = loan_status, fill =loan_status)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")+xlim(-10, 40)
+
+
+```
+
+```{r,fig.width=6,fig.height=4}
+df5=df5[df5$dti < 34.465 & df5$int_rate > 0, ]
+
+ggplot(df5, aes(x = loan_status, y = dti, fill = loan_status)) +
+  geom_boxplot()+theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))+xlab('')
+
+IQR(df5$dti)*1.5+18.88
+quantile(df5$dti)
+
+```
+
+
+
+```{r}
+
+ggplot(df5, aes(x = dti, fill = loan_status)) +
+  geom_density(alpha=0.5, aes(fill=factor(loan_status))) + labs(title="loan_status density and income") + xlim(-10, 40)+theme_bw()
+scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+```
+
+
+
+
+```{r}
+class(df5$int_rate)
+
+ggplot(df5, aes(x = int_rate, fill = loan_status)) +
+  geom_density(alpha=0.5, aes(fill=factor(loan_status))) + labs(title="loan_status density and income") + xlim(0, 30)+theme_bw()
+scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+
+
+```
+
+
+```{r}
+df5=df5[df5$int_rate < 22 & df5$int_rate > 0, ]
+
+ggplot(df5, aes(x = int_rate, y = loan_status, fill =loan_status)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")+xlim(0, 30)
+```
+
+
+```{r}
+df5=df5[df5$int_rate < 22 & df5$int_rate > 0, ]
+
+ggplot(df5, aes(x = loan_status, y = int_rate, fill = loan_status)) +
+  geom_boxplot()+theme_bw()
+
+IQR(df5$int_rate)*1.5+14.42
+quantile(df5$int_rate)
+
+```
+
+```{r}
+ggplot(df5, aes(x = grade, y = int_rate, fill = loan_status)) +
+  geom_boxplot(width = 1)+ theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+
+```
+
+
+
+
+```{r}
+df5=df5[df5$open_acc < 18.5 & df5$open_acc > 0, ]
+
+ggplot(df5, aes(x = loan_status, y = open_acc, fill = loan_status)) +
+  geom_boxplot()+theme_bw()
+
+IQR(df5$open_acc)*1.5+11
+quantile(df5$open_acc)
+```
+
+
+```{r}
+dim(df5)
+
+
+```
+
+```{r, fig.width=4,fig.height=3}
+
+df5=df5[df5$loan_amnt < 26250 & df5$loan_amnt > 0, ]
+
+ggplot(df5, aes(x = loan_status, y = loan_amnt, fill = loan_status)) +
+  geom_boxplot()+theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))+xlab('')+guides(fill=FALSE)
+
+
+IQR(df5$loan_amnt)*1.5+13500
+quantile(df5$loan_amnt)
+
+range(df5$loan_amnt)
+
+
+```
+
+```{r}
+ggplot(df5, aes(x = loan_amnt, y = loan_status, fill =loan_status)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")+xlim(0, 50000) + scale_fill_manual(values = c("salmon2", "deepskyblue4"))
+```
+
+
+
+
+
+```{r}
+unique(df5$inq_last_6mths)
+df5$inq_last_6mths = as.factor(df5$inq_last_6mths)
+summary(df5$inq_last_6mths)
+
+ggplot(df5, aes(x = inq_last_6mths, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'delinq_2yrs')+theme_bw()
+
+
+p_inq_last_6mths = ggplot(df5, mapping = aes(x = inq_last_6mths, fill = loan_status)) + geom_bar(stat='count', position='fill') +
+  labs(x = 'inq_last_6mths') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_inq_last_6mths
+
+
+
+
+```
+
+
+```{r}
+#unique(df5$revol_bal)
+df5=df5[df5$revol_bal < 28000 & df5$revol_bal > 0, ]
+
+ggplot(df5, aes(x = loan_status, y = revol_bal, fill = loan_status)) +
+  geom_boxplot()+theme_bw()
+
+IQR(df5$revol_bal)*1.5+13421
+quantile(df5$revol_bal)
+
+```
+
+
+```{r}
+ggplot(df5, aes(x = revol_bal, y = loan_status, fill =loan_status)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")+xlim(0, 30000)
+```
+
+```{r}
+dim(df5)
+unique(df5$home_ownership)
+df5=df5[df5$home_ownership !='NONE' & df5$home_ownership != 'OTHER', ]
+unique(df5$home_ownership)
+
+levels(df5$home_ownership)
+df5 = droplevels(df5)
+levels(df5$home_ownership)
+
+```
+
+
+```{r}
+unique(df5$delinq_2yrs)
+summary(df5$delinq_2yrs)
+df5$delinq_2yrs = as.factor(df5$delinq_2yrs)
+levels(df5$delinq_2yrs)
+levels(df5$delinq_2yrs) = c("0", "1+", "1+", "1+", "1+","1+", "1+", "1+", "1+","1+", "1+")
+
+
+ggplot(df5, aes(x = delinq_2yrs, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'delinq_2yrs')+theme_bw()
+
+
+p_delinq_2yrs = ggplot(df5, mapping = aes(x = delinq_2yrs, fill = loan_status)) + geom_bar(stat='count', position='fill') +
+  labs(x = 'delinq_2yrs') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_delinq_2yrs
+
+```
+
+
+```{r}
+unique(df5$inq_last_6months)
+
+
+```
+
+
+###Corss Validation, Select model
+
+```{r}
+
+str(df5)
+
+
+```
+
+```{r}
+summary(df5$term)
+summary(df5$grade)
+summary(df5$home_ownership)
+summary(df5$verification_status)
+summary(df5$deling_2yrs)
+summary(df5$purpose)
+unique(df5$open_acc)
+summary(df5$emp_length)
+#unique(df5$earliest_cr_line)
+
+
+```
+
+
+```{r}
+#install.packages("caret")
+#install.packages("randomForest")
+library(caret)
+library(randomForest)
+```
+
+
+
+```{r}
+str(df5)
+unique(df5$open_acc)
+
+df5=df5[df5$open_acc < 21 & df5$open_acc > 0, ]
+
+ggplot(df5, aes(x = loan_status, y = open_acc, fill = loan_status)) +
+  geom_boxplot()+theme_bw()
+
+IQR(df5$open_acc)*1.5+12
+quantile(df5$open_acc)
+
+```
+
+```{r}
+unique(df5$pub_rec)
+df5$pub_rec = as.factor(df5$pub_rec)
+
+summary(df5$pub_rec)
+levels(df5$pub_rec) = c("0", "1+", "1+", "1+", "1+")
+
+ggplot(df5, aes(x = delinq_2yrs, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'delinq_2yrs')+theme_bw()
+
+
+p_pub_rec = ggplot(df5, mapping = aes(x = pub_rec, fill = loan_status)) + geom_bar(stat='count', position='fill') +
+  labs(x = 'pub_rec') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_pub_rec
+
+```
+
+
+```{r}
+unique(df5$inq_last_6mths)
+df5$inq_last_6mths = as.factor(df5$inq_last_6mths)
+
+summary(df5$inq_last_6mths)
+
+levels(df5$inq_last_6mths) = c("0", "1", "2", "3+", "3+", "3+", "3+","3+","3+")
+
+ggplot(df5, aes(x = inq_last_6mths, fill = loan_status)) +
+  geom_bar(stat='count', position='stack') +
+  labs(x = 'inq_last_6mths')+theme_bw()
+
+
+p_inq_last_6mths = ggplot(df5, mapping = aes(x = inq_last_6mths, fill = loan_status)) + geom_bar(stat='count', position='fill') +
+  labs(x = 'inq_last_6mths') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_inq_last_6mths
+
+
+```
+
+
+```{r}
+summary(df5$earliest_cr_line)
+class(df5$earliest_cr_line)
+#levels(df5$earliest_cr_line)
+df5$earliest_cr_line = as.character(factor(df5$earliest_cr_line))
+
+df5=df5[nchar(df5$earliest_cr_line)>5, ]
+
+#some does not have year, so remove those
+#remove those nchar()=5
+range(nchar(df5$earliest_cr_line))
+df5$earliest_cr_line
+
+df5$earliest_cr_line = as.numeric(substr(df5$earliest_cr_line, 5,6))
+class(df5$earliest_cr_line)
+unique(df5$earliest_cr_line)
+
+#ggplot(df5, aes(x=loan_status, y=earliest_cr_line)) +
+#geom_point(size=2, shape=23)
+
+df5$earliest_cr_line[df5$earliest_cr_line >= 50 &  df5$earliest_cr_line <= 55] <- '50-55' 
+
+df5$earliest_cr_line[df5$earliest_cr_line > 55 &  df5$earliest_cr_line <= 60] <- '55-60'
+
+df5$earliest_cr_line[df5$earliest_cr_line > 60 &  df5$earliest_cr_line <= 65] <- '60-65'
+
+df5$earliest_cr_line[df5$earliest_cr_line > 65 &  df5$earliest_cr_line <= 70] <- '65-70'
+
+df5$earliest_cr_line[df5$earliest_cr_line > 70 &  df5$earliest_cr_line <= 75] <- '70-75'
+
+df5$earliest_cr_line[df5$earliest_cr_line > 75 &  df5$earliest_cr_line <= 80] <- '75-80'
+
+df5$earliest_cr_line[df5$earliest_cr_line > 80 &  df5$earliest_cr_line <= 85] <- '80-85'
+
+df5$earliest_cr_line[df5$earliest_cr_line > 85 &  df5$earliest_cr_line <= 90] <- '85-90'
+
+df5$earliest_cr_line[df5$earliest_cr_line > 90 |  df5$earliest_cr_line == 0] <- '90-00'
+
+unique(df5$earliest_cr_line)
+df5$earliest_cr_line = as.factor(df5$earliest_cr_line)
+
+summary(df5$earliest_cr_line)
+
+
+p_earliest_cr_line = ggplot(df5, mapping = aes(x = earliest_cr_line, fill = loan_status)) + geom_bar(stat='count', position='fill') +
+  labs(x = 'earliest_cr_line') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_earliest_cr_line
+
+#aggregate(loan_status ~ addr_state, df5, sum)
+
+df5=df5[df5$earliest_cr_line != '50-55' & df5$earliest_cr_line != '55-60', ]
+unique(df5$earliest_cr_line)
+df5 = droplevels(df5)
+p_earliest_cr_line
+unique(df5$earliest_cr_line)
+
+p_earliest_cr_line = ggplot(df5, mapping = aes(x = earliest_cr_line, fill = loan_status)) + geom_bar(stat='count', position='fill') +
+  labs(x = 'earliest_cr_line') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()
+
+p_earliest_cr_line
+
+```
+
+
+```{r,fig.width=6,fig.height=4}
+
+ggplot(df5, mapping = aes(x = earliest_cr_line, fill = loan_status)) + geom_bar(stat='count', position='fill') +
+  labs(x = 'earliest_cr_line') +
+  scale_fill_discrete(name="loan_status") +
+  theme_bw()+scale_fill_manual(values = c("salmon2", "deepskyblue4"))+xlab('')
+```
+
+
+
+
+```{r}
+library(data.table)
+
+df5$loan_status = as.numeric(factor(df5$loan_status))
+
+DT <- data.table(df5)
+DT[, sum(loan_status)*100/dim(df5)[1], by = addr_state]
+
+
+#state with high prob to default: CA, TX, FL, NY, NJ
+df5$add_high = ifelse(df5$addr_state %in% c("CA", "TX", "FL", "NY", "NJ"),1,0)
+df5$add_high = as.factor(df5$add_high)
+df5$addr_state =NULL
+
+str(df5)
+
+summary(df5$loan_status)
+
+df5$loan_status = as.character(df5$loan_status)
+unique(df5$loan_status)
+
+df5$loan_status[df5$loan_status == "2"] = "0"
+df5$loan_status = as.numeric(df5$loan_status)
+
+```
+
+```{r}
+str(df5)
+
+```
+
+##Standardize numerical variables
+
+```{r}
+#str(df5)
+df7 = df5
+str(df7)
+
+nums <- sapply(df7, is.numeric)
+nums
+num_col_name = names(df7[, nums])
+num_col_name
+
+dfNormZ <- as.data.frame(scale(df7[, num_col_name]))
+head(dfNormZ)
+
+
+df7$loan_amnt = dfNormZ$loan_amnt
+head(df7)
+df7$int_rate = dfNormZ$int_rate
+df7$annual_inc = dfNormZ$annual_inc
+df7$dti = dfNormZ$dti
+df7$open_acc = dfNormZ$open_acc
+df7$revol_bal = dfNormZ$revol_bal
+df7$i = NULL
+
+str(df7)
+
+```
+
+##One-hot encoding
+```{r}
+library(caret)
+dmy = dummyVars(" ~ .", data = df7, fullRank = T)
+df8 = data.frame(predict(dmy, newdata = df7))
+#str(df8)
+dim(df8)
+
+#Converting the dependent variable back to categorical
+
+df8$loan_status<-as.factor(df8$loan_status)
+#str(df8)
+
+```
+
+##Splitting data using Caret##
+
+```{r}
+#Spliting training set into two parts based on outcome: 75% and 25%
+
+index <- createDataPartition(df8$loan_status, p=0.75, list=FALSE)
+trainSet <- df8[ index,]
+testSet <- df8[-index,]
+
+dim(trainSet)
+str(testSet)
+
+```
+
+##without feature selection
+```{r}
+ctrl = trainControl(method = "repeatedcv", number =4, savePredictions = T)
+
+model_glm = train(loan_status ~ ., data = trainSet, method = "glm", family = "binomial", trControl = ctrl)
+
+pred = predict(model_glm, newdata=testSet)
+confusionMatrix(data=pred, testSet$loan_status)
+
+
+
+
+```
+
+
+```{r}
+varImp(model_glm)
+#varImpPlot(model_glm,type=2)
+```
+
+```{r}
+
+```
+
+
+##Try GLM with less predictor variables
+```{r}
+head(df7)
+str(df7)
+summary(df7$loan_status)
+df9=df7
+str(df9)
+df9 = subset(df9, select= -c(revol_bal, open_acc, earliest_cr_line, home_ownership, verification_status, emp_length))
+
+dmy = dummyVars(" ~ .", data = df9, fullRank = T)
+df10 = data.frame(predict(dmy, newdata = df9))
+
+df10$loan_status = as.factor(df10$loan_status)
+colnames(df10)
+
+
+
+index = createDataPartition(df10$loan_status, p=0.7, list=FALSE)
+train = df10[index, ]
+test = df10[-index, ]
+
+head(test)
+
+library(caret)
+
+
+```
+
+```{r}
+ctrl = trainControl(method = "repeatedcv", number =4, savePredictions = T)
+
+
+model_glm2 = train(loan_status ~ ., data = train, method = "glm", family = "binomial", trControl = ctrl)
+
+pred = predict(model_glm2, newdata=test)
+confusionMatrix(data=pred, test$loan_status)
+
+summary(pred)
+
+
+```
+
+```{r}
+varImp(model_glm2)
+
+```
+
+
+
+```{r}
+#install.packages("ROCR")
+library(pROC)
+
+```
+
+
+###Try undersampling
+
+```{r}
+str(df9)
+#install.packages("caTools")
+summary(df9$loan_status)
+#install.packages("DMwR")
+library(DMwR)
+table(df9$loan_status)
+prop.table(table(df9$loan_status))
+
+dmy = dummyVars(" ~ .", data = df9, fullRank = T)
+df11 = data.frame(predict(dmy, newdata = df9))
+str(df11)
+
+#df10$loan_status = as.factor(df10$loan_status)
+#colnames(df10)
+
+index = createDataPartition(df11$loan_status, p=0.7, list=FALSE)
+train = df11[index, ]
+test = df11[-index, ]
+
+dim(train)
+dim(test)
+
+table(train$loan_status)
+prop.table(table(train$loan_status))
+
+```
+
+
+####SMOTE works
+
+```{r}
+train$loan_status = as.factor(train$loan_status)
+train = SMOTE(loan_status ~ ., train, perc.over = 100, perc.under = 200)
+
+train$loan_status <- as.numeric(train$loan_status)
+
+table(train$loan_status)
+
+ctrl = trainControl(method="cv", number = 4)
+tbmodel = train(loan_status ~ ., data = train, method = "treebag", trControl = ctrl)
+
+predictors = names(train)[names(train) != 'loan_status']
+str(train)
+
+
+pred = predict(tbmodel$finalModel, test[, predictors])
+
+auc = roc(test$loan_amnt, pred)
+print(auc)
+
+#auc(roc(loan_status~prhat,data=df9))
+plot(roc(loan_status~pred,data=test))
+
+dim(train)/(dim(test)+dim(train))
+
+
+```
+
+###data processing again for next step
+```{r}
+set.seed(999)
+str(df9)
+summary(df9$loan_status)
+df9$loan_status <- factor(df9$loan_status)
+library(caTools)
+split = sample.split(df9$loan_status, SplitRatio = 0.75)
+
+dresstrain <- subset(df9, split == TRUE)
+dresstest <- subset(df9, split == FALSE)
+
+as.data.frame(table(df9$loan_status))
+```
+
+```{r}
+library(DMwR)
+
+## Smote : Synthetic Minority Oversampling Technique To Handle Class Imbalancy In Binary Classification
+
+balanced.data <- SMOTE(loan_status ~., dresstrain, perc.over = 100, perc.under = 200)
+
+as.data.frame(table(balanced.data$loan_status))
+
+
+
+```
+
+```{r}
+library(caret)  
+
+model = glm (loan_status~., data=balanced.data, family = binomial)
+
+summary(model)
+
+```
+
+```{r}
+## Predict the Values
+predict = predict(model, dresstest, type = 'response')
+
+## Create Confusion Matrix
+table(dresstest$loan_status, predict > 0.9)
+
+```
+
+
+```{r}
+
+auc(roc(loan_status~predict,data=dresstest))
+```
+
+
+```{r}
+str(df9)
+
+```
+
+
+##GLM under SMOTE
+```{r}
+str(train)
+
+train$loan_status = as.factor(train$loan_status)
+
+train = SMOTE(loan_status ~ ., train, perc.over = 100, perc.under = 200)
+
+train$loan_status <- as.numeric(train$loan_status)
+
+table(train$loan_status)
+range(train$loan_status)
+
+
+
+model = glm(factor(loan_status)~., data = train, family = binomial)
+
+summary(model)
+
+```
+
+```{r}
+ctrl = trainControl(method = "repeatedcv", number =4, savePredictions = T)
+
+ctrl = trainControl(method="cv", number = 4)
+train$loan_status = as.factor(train$loan_status)
+#test$loan_status = as.factor(test$loan_status)
+
+class(train$loan_status)
+class(test$loan_status)
+
+glm_model = train(loan_status ~ ., data = train, method = "glm", family = "binomial", trControl = ctrl)
+
+predictors = names(train)[names(train) != 'loan_status']
+str(train)
+
+
+pred = predict(glm_model$finalModel, test[, predictors])
+
+auc = roc(test$loan_amnt, pred)
+print(auc)
+
+#auc(roc(loan_status~prhat,data=df9))
+plot(roc(loan_status~pred,data=test))
+
+
+
+pred = predict(model_glm2, newdata=test)
+confusionMatrix(data=pred, test$loan_status)
+
+```
